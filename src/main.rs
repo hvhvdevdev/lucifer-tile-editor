@@ -2,7 +2,7 @@ use fltk::{image::*, app::*, browser::*, button::*, enums::*, input::*, prelude:
 use fltk_theme::{WidgetTheme, ThemeType};
 use crate::Message::{DisplayImage, UpdateTiles, CursorEdited};
 use std::iter::Map;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 const APP_TITLE: &str = "Lucifer Tile Editor";
 const COPYRIGHT: &str = "Copyright (C) 2021 Aurora Realms Entertainment";
@@ -19,7 +19,7 @@ fn main() {
 
     let mut win = create_main_window(sender.clone());
 
-    let mut model = Model { sender: sender.clone(), dark_mode: false, image: None, tiles: BTreeMap::new(), cursor: 0 };
+    let mut model = Model { sender: sender.clone(), dark_mode: false, image: None, tiles: BTreeMap::new(), cursor: 0, prefix: format!("Tile_") };
 
     while app.wait() {
         match receiver.recv() {
@@ -28,6 +28,12 @@ fn main() {
                 match e {
                     Message::CursorEdited(x) => {
                         model.cursor = x;
+                    }
+                    Message::ClickExportConfig => {
+                        model.export_config();
+                    }
+                    Message::ClickExportASM => {
+                        model.export_asm();
                     }
                     Message::ChangeTheme => {
                         if !model.dark_mode {
@@ -100,8 +106,10 @@ fn create_top_pane(sender: Sender<Message>) -> (Box<dyn FnMut(Message)>, Flex) {
     let mut btn = Button::default().with_label("Load PNG");
     btn.emit(sender.clone(), Message::ClickOpenImage);
     let btn = Button::default().with_label("Load Config");
-    let btn = Button::default().with_label("Copy Config");
-    let btn = Button::default().with_label("Copy ASM");
+    let mut btn = Button::default().with_label("Copy Config");
+    btn.emit(sender.clone(), Message::ClickExportConfig);
+    let mut btn = Button::default().with_label("Copy ASM");
+    btn.emit(sender.clone(), Message::ClickExportASM);
     let mut btn = Button::default().with_label("Theme");
     btn.emit(sender.clone(), Message::ChangeTheme);
 
@@ -217,6 +225,8 @@ enum Message {
     ClickTile(i32, i32),
     CursorEdited(i32),
     UpdateTiles(Model),
+    ClickExportConfig,
+    ClickExportASM,
 }
 
 #[derive(Clone, Debug)]
@@ -226,6 +236,7 @@ struct Model {
     image: Option<PngImage>,
     tiles: BTreeMap<String, (i32, i32)>,
     cursor: i32,
+    prefix: String,
 }
 
 impl Model {
@@ -238,6 +249,32 @@ impl Model {
             }
             None => return,
         };
+    }
+
+    fn export_asm(&mut self) {
+        let keys = self.tiles.keys();
+        let mut result = String::from("");
+
+        let image = self.image.clone().unwrap();
+
+        for k in keys {
+            result.push_str(&format!("\n;       {}{}:{}\n", self.prefix, k, tile_to_pattern(
+                (get_tile_in_picture(self.tiles[k].0,
+                                     self.tiles[k].1, &image)))))
+        }
+
+        println!("{}", result);
+        copy(&result);
+    }
+
+    fn export_config(&mut self) {
+        let keys = self.tiles.keys();
+        let mut result = String::from("");
+        for k in keys {
+            result = format!("{},{}:{}_{}", result, k, self.tiles[k].0, self.tiles[k].1)
+        }
+        println!("{}", result);
+        copy(&result);
     }
 
     fn set_tile(&mut self, tile: String, r: i32, c: i32) {
@@ -261,6 +298,62 @@ fn get_tile_in_picture(row: i32, col: i32, image: &PngImage) -> RgbImage {
     RgbImage::new(&data, 8, 8, ColorDepth::Rgba8).unwrap()
 }
 
+fn tile_to_pattern(image: RgbImage) -> String {
+    let mut result = String::new();
+    let data = image.to_rgb_data();
+    let mut colors: BTreeSet<u8> = BTreeSet::new();
+
+    for y in 0..image.h() {
+        for x in 0..image.w() {
+            colors.insert(data[(y * 4 * image.w() + x * 4) as usize].into());
+        }
+    }
+
+
+    for i in 0..data.len() / 4 {
+        let byte = data[i * 4];
+
+        let val = colors.iter().position(|&r| r == byte).unwrap();
+        let temp = match val {
+            0 => "0",
+            1 => "1",
+            2 => "0",
+            3 => "1",
+            _ => panic!("Too many colors!")
+        };
+
+        let mut temp = String::from(temp);
+
+        if i % 8 == 0 {
+            temp = format!("\n        .db     %{}", temp);
+        }
+
+        result.push_str(&temp);
+    }
+
+    for i in 0..data.len() / 4 {
+        let byte = data[i * 4];
+
+        let val = colors.iter().position(|&r| r == byte).unwrap();
+        let temp = match val {
+            0 => "0",
+            1 => "0",
+            2 => "1",
+            3 => "1",
+            _ => panic!("Too many colors!")
+        };
+
+        let mut temp = String::from(temp);
+
+        if i % 8 == 0 {
+            temp = format!("\n        .db     %{}", temp);
+        }
+
+        result.push_str(&temp);
+    }
+
+    result
+}
 // use fltk::{image::*, app::*, browser::*, button::*, enums::*, input::*, prelude::*, window::*};
 // use fltk_theme::{WidgetTheme, ThemeType};
 // use fltk_flex::Flex;
