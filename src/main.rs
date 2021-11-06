@@ -1,6 +1,8 @@
 use fltk::{image::*, app::*, browser::*, button::*, enums::*, input::*, prelude::*, window::*, frame::*, dialog::*, group::*};
 use fltk_theme::{WidgetTheme, ThemeType};
-use crate::Message::DisplayImage;
+use crate::Message::{DisplayImage, UpdateTiles, CursorEdited};
+use std::iter::Map;
+use std::collections::BTreeMap;
 
 const APP_TITLE: &str = "Lucifer Tile Editor";
 const COPYRIGHT: &str = "Copyright (C) 2021 Aurora Realms Entertainment";
@@ -17,13 +19,16 @@ fn main() {
 
     let mut win = create_main_window(sender.clone());
 
-    let mut model = Model { sender: sender.clone(), dark_mode: false, image: None };
+    let mut model = Model { sender: sender.clone(), dark_mode: false, image: None, tiles: BTreeMap::new(), cursor: 0 };
 
     while app.wait() {
         match receiver.recv() {
             Some(e) => {
                 win(e.clone());
                 match e {
+                    Message::CursorEdited(x) => {
+                        model.cursor = x;
+                    }
                     Message::ChangeTheme => {
                         if !model.dark_mode {
                             let widget_theme = WidgetTheme::new(ThemeType::HighContrast);
@@ -34,6 +39,12 @@ fn main() {
                             widget_theme.apply();
                             model.dark_mode = false;
                         }
+                    }
+                    Message::ClickTile(r, c) => {
+                        model.set_tile(format!("{:#04x}", model.cursor), r, c);
+                        model.cursor += 1;
+                        win(UpdateTiles(model.clone()));
+                        win(CursorEdited(model.cursor));
                     }
                     Message::ClickOpenImage => {
                         model.load_png();
@@ -48,7 +59,9 @@ fn main() {
                     _ => println!("{:?}", e),
                 }
             }
-            None => {}
+            None => {
+                win(Message::Nothing)
+            }
         }
     }
 }
@@ -77,7 +90,7 @@ fn create_main_window(sender: Sender<Message>) -> Box<dyn FnMut(Message)> {
         main_pane_handler(m.clone());
         bottom_pane_handler(m.clone());
         footer_pane_handler(m.clone());
-        println!("{} {} {:?}", win.x(), win.y(), get_mouse());
+        // println!("{} {} {:?}", win.x(), win.y(), get_mouse());
     })
 }
 
@@ -108,19 +121,39 @@ fn create_footer_pane(sender: Sender<Message>) -> (Box<dyn FnMut(Message)>, Flex
 fn create_main_pane(sender: Sender<Message>) -> Box<dyn FnMut(Message)> {
     let mut flex = Flex::default().column();
     let mut scroll = Scroll::default();
+
     scroll.end();
     flex.end();
     Box::new(move |m| {
         match m {
+            Message::UpdateTiles(m) => {
+                let n_cols = m.image.clone().unwrap().w() / 8;
+
+                for i in 0..scroll.children() {
+                    scroll.child(i).unwrap().set_label("??");
+                }
+
+                for i in 0..scroll.children() {
+                    let c = i % n_cols;
+                    let r = i / n_cols;
+                    for j in m.clone().tiles.into_iter() {
+                        if j.1.0 == r && j.1.1 == c {
+                            scroll.child(i).unwrap().set_label(&j.0);
+                        }
+                    }
+                }
+            }
             DisplayImage(image) => {
                 scroll.clear();
                 scroll.begin();
+
                 for r in 0..image.h() / 8 {
                     for c in 0..image.w() / 8 {
                         let mut btn = Button::default().with_size(33, 48).with_pos(c * 34, r * 49).with_label("?");
                         let mut image = get_tile_in_picture(r, c, &image);
                         image.scale(32, 32, true, true);
                         btn.set_image(Some(image));
+                        btn.emit(sender.clone(), Message::ClickTile(r, c));
                     }
                 }
                 scroll.end();
@@ -158,7 +191,17 @@ fn create_bottom_pane(sender: Sender<Message>) -> (Box<dyn FnMut(Message)>, Flex
     (Box::new(move |m| {
         if input_cursor.changed() {
             input_cursor.clear_changed();
-            frame_cursor.set_label(&format!("{:#04x}", input_cursor.value().parse::<i32>().unwrap_or(0)));
+            let cursor = input_cursor.value().parse::<i32>().unwrap_or(0);
+            frame_cursor.set_label(&format!("{:#04x}", cursor));
+            sender.send(Message::CursorEdited(cursor));
+        }
+
+        match m {
+            Message::CursorEdited(x) => {
+                frame_cursor.set_label(&format!("{:#04x}", x));
+                input_cursor.set_value(&format!("{}", x))
+            }
+            _ => {}
         }
     }), flex)
 }
@@ -166,10 +209,14 @@ fn create_bottom_pane(sender: Sender<Message>) -> (Box<dyn FnMut(Message)>, Flex
 
 #[derive(Clone, Debug)]
 enum Message {
+    Nothing,
     ChangeTheme,
     ClickOpenImage,
     ImageLoaded,
     DisplayImage(PngImage),
+    ClickTile(i32, i32),
+    CursorEdited(i32),
+    UpdateTiles(Model),
 }
 
 #[derive(Clone, Debug)]
@@ -177,6 +224,8 @@ struct Model {
     sender: Sender<Message>,
     dark_mode: bool,
     image: Option<PngImage>,
+    tiles: BTreeMap<String, (i32, i32)>,
+    cursor: i32,
 }
 
 impl Model {
@@ -189,6 +238,11 @@ impl Model {
             }
             None => return,
         };
+    }
+
+    fn set_tile(&mut self, tile: String, r: i32, c: i32) {
+        self.tiles.insert(tile, (r, c));
+        // println!("Tiles: {:?}", self.tiles);
     }
 }
 
