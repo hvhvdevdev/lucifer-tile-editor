@@ -47,8 +47,12 @@ fn main() {
                         }
                     }
                     Message::ClickTile(r, c) => {
-                        model.set_tile(format!("{:#04x}", model.cursor), r, c);
-                        model.cursor += 1;
+                        if !event_key_down(Key::ControlL) {
+                            model.set_tile(format!("{:#04x}", model.cursor), r, c);
+                            model.cursor += 1;
+                        } else {
+                            model.clear_tile(r, c);
+                        }
                         win(UpdateTiles(model.clone()));
                         win(CursorEdited(model.cursor));
                     }
@@ -83,7 +87,7 @@ fn create_main_window(sender: Sender<Message>) -> Box<dyn FnMut(Message)> {
     let (mut bottom_pane_handler, mut bottom_pane) = create_bottom_pane(sender.clone());
     let (mut footer_pane_handler, mut footer_pane) = create_footer_pane(sender.clone());
 
-    flex.set_size(&mut footer_pane, 30);
+    flex.set_size(&mut footer_pane, 40);
     flex.set_size(&mut top_pane, 25);
     flex.set_size(&mut bottom_pane, 50);
 
@@ -120,6 +124,7 @@ fn create_top_pane(sender: Sender<Message>) -> (Box<dyn FnMut(Message)>, Flex) {
 fn create_footer_pane(sender: Sender<Message>) -> (Box<dyn FnMut(Message)>, Flex) {
     let flex = Flex::default().column();
 
+    let _frame = Frame::default().with_label("Help: Hold Ctrl and Click to remove tile.");
     let _frame = Frame::default().with_label(COPYRIGHT);
 
     flex.end();
@@ -278,8 +283,21 @@ impl Model {
     }
 
     fn set_tile(&mut self, tile: String, r: i32, c: i32) {
+        self.clear_tile(r, c);
         self.tiles.insert(tile, (r, c));
         // println!("Tiles: {:?}", self.tiles);
+    }
+
+    fn clear_tile(&mut self, r: i32, c: i32) {
+        let mut to_clear = String::new();
+
+        for tile in self.tiles.iter() {
+            if tile.1.0 == r && tile.1.1 == c {
+                to_clear = String::from(tile.0);
+            }
+        }
+
+        self.tiles.remove(&to_clear);
     }
 }
 
