@@ -56,6 +56,10 @@ fn main() {
                         win(UpdateTiles(model.clone()));
                         win(CursorEdited(model.cursor));
                     }
+                    Message::ClickLoadConfig => {
+                        model.import_config(input_default("Config", "").unwrap_or(String::new()));
+                        win(UpdateTiles(model.clone()));
+                    }
                     Message::ClickOpenImage => {
                         model.load_png();
 
@@ -109,7 +113,8 @@ fn create_top_pane(sender: Sender<Message>) -> (Box<dyn FnMut(Message)>, Flex) {
 
     let mut btn = Button::default().with_label("Load PNG");
     btn.emit(sender.clone(), Message::ClickOpenImage);
-    let btn = Button::default().with_label("Load Config");
+    let mut btn = Button::default().with_label("Load Config");
+    btn.emit(sender.clone(), Message::ClickLoadConfig);
     let mut btn = Button::default().with_label("Copy Config");
     btn.emit(sender.clone(), Message::ClickExportConfig);
     let mut btn = Button::default().with_label("Copy ASM");
@@ -232,6 +237,7 @@ enum Message {
     UpdateTiles(Model),
     ClickExportConfig,
     ClickExportASM,
+    ClickLoadConfig,
 }
 
 #[derive(Clone, Debug)]
@@ -263,13 +269,25 @@ impl Model {
         let image = self.image.clone().unwrap();
 
         for k in keys {
-            result.push_str(&format!("\n;       {}{}:{}\n", self.prefix, k, tile_to_pattern(
+            result.push_str(&format!("\n;\n       .org {} * 16\n        {}{}:{}\n", k.replace("0x", "$"), self.prefix, k, tile_to_pattern(
                 (get_tile_in_picture(self.tiles[k].0,
                                      self.tiles[k].1, &image)))))
         }
 
-        println!("{}", result);
-        copy(&result);
+        println!("{};", result);
+        copy(&format!("{};", result));
+    }
+
+    fn import_config(&mut self, cfg: String) {
+        let tiles = cfg.split(",").filter(|x| x.len() > 3);
+
+        for tile in tiles {
+            let temp = tile.split(":").collect::<Vec<&str>>();
+            let key = temp[0];
+            let temp = temp[1].split("_").collect::<Vec<&str>>();
+            println!("{} {} {}", key, 0, 0);
+            self.set_tile(String::from(key), temp[0].parse::<i32>().unwrap_or(0), temp[1].parse::<i32>().unwrap_or(0));
+        }
     }
 
     fn export_config(&mut self) {
